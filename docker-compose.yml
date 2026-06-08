@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: insightlens-postgres
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.docker
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-insightlens_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-insightlens_password}
+      POSTGRES_DB: ${POSTGRES_DB:-insightlens_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - insightlens_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: insightlens-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - insightlens_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+    container_name: insightlens-api
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.docker
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_worker:
+    build:
+      context: ./backend
+    container_name: insightlens-celery-worker
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.docker
+    command: celery -A app.core.celery_app.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  insightlens_postgres_data:
+  insightlens_redis_data:
